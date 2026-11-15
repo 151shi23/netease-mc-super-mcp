@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "netease-mc-super": {
+      "command": "<repo>/modsdk_mcp_server/.venv/bin/python",
+      "args": ["<repo>/super-mcp/super_mcp.py"],
+      "env": {
+        "SUPER_PROJECT": "D:/MyAddon",
+        "SUPER_OFFICIAL_ROOT": "<repo>/vendor/modsdk_mcp_server",
+        "SUPER_MCDK_BRIDGE": "D:/MCDevTool/build/mcdk_stdio_bridge.exe",
+        "SUPER_MCDK_HOST": "localhost",
+        "SUPER_MCDK_PORT": "19133"
+      }
+    }
+  }
+}
