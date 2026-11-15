@@ -30,6 +30,7 @@ import asyncio
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -137,7 +138,7 @@ META_TOOLS = [
     ),
     types.Tool(
         name="mc_health",
-        description="体检：上游连通性、项目路径、mcdev.json 的 MCP 开关、台账是否存在。排障第一步。",
+        description="体检：探测官方/超级/mcdk 是否已装，检查上游连通性、项目路径、mcdev 开关与台账。排障第一步。",
         inputSchema={"type": "object", "properties": {"project": {"type": "string"}}},
     ),
     types.Tool(
@@ -214,6 +215,60 @@ def _run_script(script, args, timeout=180):
         return 2, "%s: %s" % (type(exc).__name__, exc)
 
 
+INSTALL_LINKS = {
+    "official_mcp": "https://github.com/MCNeteaseDevs/modsdk_mcp_server",
+    "super_mcp": "https://github.com/151shi23/netease-mc-super-mcp",
+    "mcdk": "https://github.com/GitHub-Zero123/MCDevTool/releases",
+    "mc_studio": "https://mc.163.com/",
+}
+
+
+def _env_check_script():
+    candidates = []
+    if os.environ.get("SUPER_SCRIPTS"):
+        candidates.append(Path(os.environ["SUPER_SCRIPTS"]))
+    candidates += [
+        WORKSPACE / "skills" / "netease-mc-modsdk-super" / "scripts",
+        REPO / "scripts",
+        REPO.parent / "scripts",
+    ]
+    for candidate in candidates:
+        script = candidate / "env_check.py"
+        if script.exists():
+            return script
+    return None
+
+
+def _env_snapshot():
+    """优先调用 Skill 的 env_check.py；没有则退化为最小探测。"""
+    script = _env_check_script()
+    if script:
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(script), "--json"],
+                capture_output=True, text=True, timeout=20,
+            )
+            if proc.stdout.strip():
+                return json.loads(proc.stdout)
+        except Exception:
+            pass
+
+    official = os.environ.get("NEMC_MCP_ROOT") or os.environ.get("MODSDK_MCP_ROOT")
+    if not official:
+        vendor = REPO.parent / "vendor" / "modsdk_mcp_server"
+        official = str(vendor) if (vendor / "start_mcp.py").exists() else None
+    mcdk = shutil.which("mcdk") or shutil.which("mcdk.exe")
+    missing = [k for k, v in (("official_mcp", official), ("mcdk", mcdk)) if not v]
+    return {
+        "official_mcp": {"found": bool(official), "path": official},
+        "super_mcp": {"found": True, "path": str(REPO)},
+        "mcdk": {"found": bool(mcdk), "path": mcdk},
+        "missing": missing,
+        "links": INSTALL_LINKS,
+        "source": "builtin",
+    }
+
+
 def _mcdev_status(project):
     path = project / ".mcdev.json"
     if not path.exists():
@@ -256,6 +311,15 @@ def handle_meta(name, args, upstreams):
             "事实台账: %s" % ("存在" if ledger.exists() else "缺失（首次开发可接受，交付前必须有）"),
             "预检脚本: %s" % ("存在" if (SCRIPTS / "preflight.py").exists() else "缺失"),
         ]
+        env = _env_snapshot()
+        found = lambda key: "已装" if env.get(key, {}).get("found") else "未装"
+        lines.append("环境探测: 官方 MCP %s | 超级 MCP %s | mcdk %s" % (
+            found("official_mcp"), found("super_mcp"), found("mcdk")))
+        if env.get("missing"):
+            lines.append("缺失组件: %s" % ", ".join(env["missing"]))
+            for key in env["missing"]:
+                lines.append("  - %s: %s" % (key, (env.get("links") or {}).get(key, "")))
+            lines.append("下一步: 先询问用户是否安装；同意后按 16-env-check.md 下载，勿自动安装")
         if platform.system() != "Windows":
             lines.append("提示: 运行时层仅 Windows 可用，本机只能做文档/生成/静态检查。")
         return _text("\n".join(lines))
